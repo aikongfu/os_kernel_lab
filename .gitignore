@@ -2,3 +2,8 @@
 os/target/*
 os/.idea/*
 Cargo.lock
+labcodes/lab1/.idea
+labcodes_answer/.vscode
+labcodes/lab1/.vscode
+labcodes_answer/lab1_result/tools/vector.exe
+*.d
