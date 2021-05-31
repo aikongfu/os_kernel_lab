@@ -11,10 +11,10 @@
 #define SEG_TSS        5
 
 /* global descriptor numbers */
-#define GD_KTEXT    ((SEG_KTEXT) << 3)        // kernel text
-#define GD_KDATA    ((SEG_KDATA) << 3)        // kernel data
-#define GD_UTEXT    ((SEG_UTEXT) << 3)        // user text
-#define GD_UDATA    ((SEG_UDATA) << 3)        // user data
+#define GD_KTEXT    ((SEG_KTEXT) << 3)        // kernel text,   1 << 3 = 8
+#define GD_KDATA    ((SEG_KDATA) << 3)        // kernel data,   2 << 3 = 16
+#define GD_UTEXT    ((SEG_UTEXT) << 3)        // user text,     3 << 3 = 24
+#define GD_UDATA    ((SEG_UDATA) << 3)        // user data,     4 << 3 = 32
 #define GD_TSS        ((SEG_TSS) << 3)        // task segment selector
 
 #define DPL_KERNEL    (0)

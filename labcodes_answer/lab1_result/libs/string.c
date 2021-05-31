@@ -285,7 +285,7 @@ memset(void *s, char c, size_t n) {
  * the memory area pointed by @dst. @src and @dst are allowed to overlap.
  * @dst        pointer to the destination array where the content is to be copied
  * @src        pointer to the source of data to by copied
- * @n:        number of bytes to copy
+ * @n:         number of bytes to copy
  *
  * The memmove() function returns @dst.
  * */

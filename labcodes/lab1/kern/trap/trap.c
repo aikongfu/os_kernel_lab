@@ -27,15 +27,59 @@ static void print_ticks() {
  * */
 static struct gatedesc idt[256] = {{0}};
 
+/* Pseudo-descriptors used for LGDT, LLDT(not used) and LIDT instructions. */
+// struct pseudodesc {
+//     uint16_t pd_lim;        // Limit
+//     uint32_t pd_base;        // Base address
+// } __attribute__ ((packed));
+
 static struct pseudodesc idt_pd = {
     sizeof(idt) - 1, (uintptr_t)idt
 };
+
+
+
+
+/* Gate descriptors for interrupts and traps */
+struct gatedesc1 {
+    unsigned gd_off_15_0 : 16;        // low 16 bits of offset in segment
+    unsigned gd_ss : 16;            // segment selector
+    unsigned gd_args : 5;            // # args, 0 for interrupt/trap gates
+    unsigned gd_rsv1 : 3;            // reserved(should be zero I guess)
+    unsigned gd_type : 4;            // type(STS_{TG,IG32,TG32})
+    unsigned gd_s : 1;                // must be 0 (system)
+    unsigned gd_dpl : 2;            // descriptor(meaning new) privilege level
+    unsigned gd_p : 1;                // Present
+    unsigned gd_off_31_16 : 16;        // high bits of offset in segment
+};
+
+/* *
+ * Set up a normal interrupt/trap gate descriptor
+ *   - istrap: 1 for a trap (= exception) gate, 0 for an interrupt gate
+ *   - sel: Code segment selector for interrupt/trap handler
+ *   - off: Offset in code segment for interrupt/trap handler
+ *   - dpl: Descriptor Privilege Level - the privilege level required
+ *          for software to invoke this interrupt/trap gate explicitly
+ *          using an int instruction.
+ * */
+#define SETGATE1(gate, istrap, sel, off, dpl) {            \
+    (gate).gd_off_15_0 = (uint32_t)(off) & 0xffff;        \
+    (gate).gd_ss = (sel);                                \
+    (gate).gd_args = 0;                                    \
+    (gate).gd_rsv1 = 0;                                    \
+    (gate).gd_type = (istrap) ? STS_TG32 : STS_IG32;    \
+    (gate).gd_s = 0;                                    \
+    (gate).gd_dpl = (dpl);                                \
+    (gate).gd_p = 1;                                    \
+    (gate).gd_off_31_16 = (uint32_t)(off) >> 16;        \
+}
+
 
 /* idt_init - initialize IDT to each of the entry points in kern/trap/vectors.S */
 void
 idt_init(void) {
      /* LAB1 YOUR CODE : STEP 2 */
-     /* (1) Where are the entry addrs of each Interrupt Service Routine (ISR)?
+     /* (1) Where are the entry address of each Interrupt Service Routine (ISR)?
       *     All ISR's entry addrs are stored in __vectors. where is uintptr_t __vectors[] ?
       *     __vectors[] is in kern/trap/vector.S which is produced by tools/vector.c
       *     (try "make" command in lab1, then you will find vector.S in kern/trap DIR)
@@ -46,6 +90,15 @@ idt_init(void) {
       *     You don't know the meaning of this instruction? just google it! and check the libs/x86.h to know more.
       *     Notice: the argument of lidt is idt_pd. try to find it!
       */
+    extern uintptr_t __vectors;
+    int i;
+    for (i = 0; i < sizeof(idt) / sizeof(struct gatedesc); i++) {
+        SETGATE(idt[i], 0, GD_KTEXT, __vectors[i], DPL_KERNEL);
+    }
+
+    SETGATE(idt[T_SWITCH_TOK], 0, GD_KTEXT, __vectors[T_SWITCH_TOK], DPL_USER);
+
+    lidt(&idt_pd);
 }
 
 static const char *
@@ -134,6 +187,9 @@ print_regs(struct pushregs *regs) {
     cprintf("  eax  0x%08x\n", regs->reg_eax);
 }
 
+/* temporary trapframe or pointer to trapframe */
+struct trapframe switchk2u, *switchu2k;
+
 /* trap_dispatch - dispatch based on what type of trap occurred */
 static void
 trap_dispatch(struct trapframe *tf) {
@@ -143,10 +199,15 @@ trap_dispatch(struct trapframe *tf) {
     case IRQ_OFFSET + IRQ_TIMER:
         /* LAB1 YOUR CODE : STEP 3 */
         /* handle the timer interrupt */
-        /* (1) After a timer interrupt, you should record this event using a global variable (increase it), such as ticks in kern/driver/clock.c
+        /* (1) After a timer interrupt, you should record this event using a global variable (increase it), 
+         * such as ticks in kern/driver/clock.c
          * (2) Every TICK_NUM cycle, you can print some info using a funciton, such as print_ticks().
          * (3) Too Simple? Yes, I think so!
          */
+        ticks++;
+        if (ticks % TICK_NUM == 0) {
+            print_ticks();
+        }
         break;
     case IRQ_OFFSET + IRQ_COM1:
         c = cons_getc();
@@ -158,9 +219,43 @@ trap_dispatch(struct trapframe *tf) {
         break;
     //LAB1 CHALLENGE 1 : YOUR CODE you should modify below codes.
     case T_SWITCH_TOU:
-    case T_SWITCH_TOK:
-        panic("T_SWITCH_** ??\n");
+        if (tf->tf_cs != USER_CS) {
+            switchk2u = *tf;
+            switchk2u.tf_cs = USER_CS;
+            switchk2u.tf_ds = switchk2u.tf_es = switchk2u.tf_ss = USER_DS;
+            switchk2u.tf_esp = (uint32_t)tf + sizeof(struct trapframe) - 8;
+		
+            // set eflags, make sure ucore can use io under user mode.
+            // if CPL > IOPL, then cpu will generate a general protection.
+            switchk2u.tf_eflags |= FL_IOPL_MASK;
+		
+            // set temporary stack
+            // then iret will jump to the right stack
+            *((uint32_t *)tf - 1) = (uint32_t)&switchk2u;
+        }
         break;
+    case T_SWITCH_TOK:
+        if (tf->tf_cs != KERNEL_CS) {
+            tf->tf_cs = KERNEL_CS;
+            tf->tf_ds = tf->tf_es = KERNEL_DS;
+            //  FL_IOPL_MASK = 00000000000000000011000000000000
+            // ~FL_IOPL_MASK = 11111111111111111100111111111111
+            tf->tf_eflags &= ~FL_IOPL_MASK;
+            switchu2k = (struct trapframe *)(tf->tf_esp - (sizeof(struct trapframe) - 8));
+            memmove(switchu2k, tf, sizeof(struct trapframe) - 8);
+            *((uint32_t *)tf - 1) = (uint32_t)switchu2k;
+        }
+        break;
+    // case T_SWITCH_TOU:
+    //     asm volatile("int %0 \n" 
+    //     : 
+    //     :"i"(T_SWITCH_TOU));
+    // case T_SWITCH_TOK:
+        
+
+    //     panic("T_SWITCH_** ??\n");
+
+    //     break;
     case IRQ_OFFSET + IRQ_IDE1:
     case IRQ_OFFSET + IRQ_IDE2:
         /* do nothing */

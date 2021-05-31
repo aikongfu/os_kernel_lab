@@ -88,6 +88,7 @@ gdt_init(void) {
     lgdt(&gdt_pd);
 
     // load the TSS
+    // GD_TSS = 5 << 3 = 5 * 8 = 40
     ltr(GD_TSS);
 }
 

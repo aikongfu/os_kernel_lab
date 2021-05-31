@@ -31,7 +31,7 @@
  * */
 
 #define SECTSIZE        512
-#define ELFHDR          ((struct elfhdr *)0x10000)      // scratch space
+#define ELFHDR          ((struct elfhdr *)0x10000)      // scratch space //暂存空间
 
 /* waitdisk - wait for disk ready */
 static void
@@ -46,6 +46,10 @@ readsect(void *dst, uint32_t secno) {
     // wait for disk to be ready
     waitdisk();
 
+    // 硬盘读写的基本单位是扇区。就是说，要读就至少读一个扇区，
+    // 要写就至少写一个扇区，不可能仅读写一个扇区中的几个字节。
+    // 这样一来，就使得主机和硬盘之间的数据交换是成块的，所以硬盘是典型的块设备。
+    // https://blog.csdn.net/qq_42815549/article/details/103001087
     outb(0x1F2, 1);                         // count = 1
     outb(0x1F3, secno & 0xFF);
     outb(0x1F4, (secno >> 8) & 0xFF);
@@ -63,6 +67,9 @@ readsect(void *dst, uint32_t secno) {
 /* *
  * readseg - read @count bytes at @offset from kernel into virtual address @va,
  * might copy more than asked.
+ * va: virtual address
+ * count: size count
+ * offset: offset
  * */
 static void
 readseg(uintptr_t va, uint32_t count, uint32_t offset) {

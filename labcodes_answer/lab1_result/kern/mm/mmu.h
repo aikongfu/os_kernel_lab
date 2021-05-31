@@ -68,6 +68,15 @@ struct gatedesc {
  *          for software to invoke this interrupt/trap gate explicitly
  *          using an int instruction.
  * */
+/**
+ * macro 宏
+ * 设置一个硬件/软件中断描述符
+ * gate     gatedesc
+ * istrap   1是异常中断，0是硬件中断
+ * sel      代码段选择子(中断处理)
+ * off      代码段选择子偏移(中断处理)
+ * dpl      描述符权限等级
+ * */
 #define SETGATE(gate, istrap, sel, off, dpl) {            \
     (gate).gd_off_15_0 = (uint32_t)(off) & 0xffff;        \
     (gate).gd_ss = (sel);                                \
