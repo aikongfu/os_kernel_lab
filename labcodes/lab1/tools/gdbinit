@@ -1,4 +1,30 @@
+#file bin/kernel
+#target remote :1234
+#b serial_init
+#c
+#define hook-stop
+#x/i $pc
+#end
+
+
+#file obj/bootblock.o
 file bin/kernel
+set architecture i8086
 target remote :1234
-break kern_init
-continue
+#b* 0x7c00
+b kern_init
+b gdt_init
+b print_stackframe
+b lab1_switch_to_user
+b lab1_switch_to_kernel
+b trapentry.S:6
+b trap.c:178
+b trap.c:192
+b kdebug.c:318
+b vectors.s:599
+b vectors.s:604
+
+#define hook-stop
+#x/i $eip
+#end
+#continue
