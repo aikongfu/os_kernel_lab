@@ -218,6 +218,12 @@ trap_dispatch(struct trapframe *tf) {
         cprintf("kbd [%03d] %c\n", c, c);
         break;
     //LAB1 CHALLENGE 1 : YOUR CODE you should modify below codes.
+	// T_SWITCH_TOU = 120
+	// T_SWITCH_TOK = 121
+    // USER_CS = 27 = 0x1b
+    // KERNEL_CS = 8 = 0x08
+    // FL_IOPL_MASK = 0x00003000 = 00000000000000000011000000000000
+    // tf是一个指针，
     case T_SWITCH_TOU:
         if (tf->tf_cs != USER_CS) {
             switchk2u = *tf;
