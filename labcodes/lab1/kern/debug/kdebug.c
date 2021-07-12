@@ -311,6 +311,9 @@ print_stackframe(void) {
         cprintf("args: 0x%08x 0x%08x 0x%08x 0x%08x \n", arguments[0], arguments[1], arguments[2], arguments[3]);
 
         print_debuginfo(eipValue-1);
+
+        // ebp 的值是一个int类型的值，读的是ebp寄存器里面的值，
+        // (uint32_t*)(ebpValue)则是一个指针，
         eipValue = ((uint32_t*)(ebpValue) + 1);
         ebpValue = *(uint32_t*)(ebpValue);  
     }

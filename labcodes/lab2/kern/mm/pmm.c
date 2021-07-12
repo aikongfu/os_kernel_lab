@@ -275,6 +275,8 @@ boot_alloc_page(void) {
 void
 pmm_init(void) {
     // We've already enabled paging
+    // 设置 boot_cr3 = boot_pgdir - 0xC0000000
+    // 
     boot_cr3 = PADDR(boot_pgdir);
 
     //We need to alloc/free the physical memory (granularity is 4KB or other size). 
