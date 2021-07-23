@@ -59,84 +59,163 @@ free_area_t free_area;
 #define free_list (free_area.free_list)
 #define nr_free (free_area.nr_free)
 
-static void
+
+// 初始化
+static void 
 default_init(void) {
+    // list_init(list_entry_t *elm) {
+    //   elm->prev = elm->next = elm;
+    // }
+    // 初始化一个双向链表
     list_init(&free_list);
-    nr_free = 0;
+
+    // nr_free设置为0
+    nr_free = 0;    
 }
 
-static void
+
+/**
+ * (3) default_init_memmap:  CALL GRAPH: 
+ * kern_init --> pmm_init-->page_init-->init_memmap--> pmm_manager->init_memmap
+ * This fun is used to init a free block (with parameter: addr_base, page_number).
+ * First you should init each page (in memlayout.h) in this free block, include:
+ *     p->flags should be set bit PG_property (means this page is valid. In pmm_init fun (in pmm.c),
+ *     the bit PG_reserved is setted in p->flags)
+ *     if this page  is free and is not the first page of free block, p->property should be set to 0.
+ *     if this page  is free and is the first page of free block, p->property should be set to total num of block.
+ *     p->ref should be 0, because now p is free and no reference.
+ *     We can use p->page_link to link this page to free_list, (such as: list_add_before(&free_list, &(p->page_link)); )
+ * Finally, we should sum the number of free mem block: nr_free+=n
+ **/
+static void 
 default_init_memmap(struct Page *base, size_t n) {
     assert(n > 0);
     struct Page *p = base;
-    for (; p != base + n; p ++) {
+    for (; p != base + n; p++) {
         assert(PageReserved(p));
-        p->flags = p->property = 0;
+        p->flags = 0;
+        SetPageProperty(p);
+        p->property = 0;
         set_page_ref(p, 0);
+        list_add_after(&free_list, &(p->page_link));
     }
-    base->property = n;
-    SetPageProperty(base);
+
     nr_free += n;
-    list_add(&free_list, &(base->page_link));
+    base->property = n;
 }
+
+/**
+ * (4) default_alloc_pages: search find a first free block (block size >=n) in free list and reszie the free block, return the addr
+ *              of malloced block.
+ *              (4.1) So you should search freelist like this:
+ *                       list_entry_t le = &free_list;
+ *                       while((le=list_next(le)) != &free_list) {
+ *                       ....
+ *                 (4.1.1) In while loop, get the struct page and check the p->property (record the num of free block) >=n?
+ *                       struct Page *p = le2page(le, page_link);
+ *                       if(p->property >= n){ ...
+ *                 (4.1.2) If we find this p, then it' means we find a free block(block size >=n), and the first n pages can be malloced.
+ *                     Some flag bits of this page should be setted: PG_reserved =1, PG_property =0
+ *                     unlink the pages from free_list
+ *                     (4.1.2.1) If (p->property >n), we should re-caluclate number of the the rest of this free block,
+ *                           (such as: le2page(le,page_link))->property = p->property - n;)
+ *                 (4.1.3)  re-caluclate nr_free (number of the the rest of all free block)
+ *                 (4.1.4)  return p
+ *               (4.2) If we can not find a free block (block size >=n), then return NULL
+ **/
+// 内存分配, 返回页
+// static struct Page *
+// default_alloc_pages(size_t n) {
+    // 1.检查n
+    // 2.nr_free
+    // 3.通过list来查找，看看有没有哪个的property>=n，如果有继续处理
+    // 4.如果property>n，则要把中间这段从双向链表中移除
+    //      4.1 根据指针特性，拿到n个之后的list结点
+    //      4.2 设置该结点的property
+    //      4.3 设置该结点flags的property位
+    //      4.4 把要分配的链表块放到最后面
+    
+    // 把要分配的块从list中删除
+    // 设置nr_free
+    // 清除待分配块flags的property
+// }
 
 static struct Page *
 default_alloc_pages(size_t n) {
     assert(n > 0);
-    if (n > nr_free) {
+    if (nr_free < n) {
         return NULL;
     }
-    struct Page *page = NULL;
-    list_entry_t *le = &free_list;
+
+    list_entry_t *le, *len;
+    le = &free_list;
     while ((le = list_next(le)) != &free_list) {
         struct Page *p = le2page(le, page_link);
         if (p->property >= n) {
-            page = p;
-            break;
+            int i;
+            for (i = 0; i < n; i++) {
+                len = list_next(le);
+                struct Page *pp = le2page(le, page_link);
+                SetPageReserved(pp);
+                ClearPageProperty(pp);
+                list_del(le);
+                le = len;
+            }
+            if (p->property > n) {
+                (le2page(le, page_link))->property = p->property - n;
+            }
+
+            SetPageReserved(p);
+            ClearPageProperty(p);
+            nr_free -= n;
+
+            return p;
         }
     }
-    if (page != NULL) {
-        list_del(&(page->page_link));
-        if (page->property > n) {
-            struct Page *p = page + n;
-            p->property = page->property - n;
-            list_add(&free_list, &(p->page_link));
-    }
-        nr_free -= n;
-        ClearPageProperty(page);
-    }
-    return page;
+    return NULL;
 }
 
+// 内存释放
 static void
 default_free_pages(struct Page *base, size_t n) {
     assert(n > 0);
+    assert(PageReserved(base));
+    
     struct Page *p = base;
-    for (; p != base + n; p ++) {
-        assert(!PageReserved(p) && !PageProperty(p));
+    for (; p != base + n; p++) {
         p->flags = 0;
         set_page_ref(p, 0);
     }
+
     base->property = n;
-    SetPageProperty(base);
-    list_entry_t *le = list_next(&free_list);
-    while (le != &free_list) {
+    ClearPageReserved(base);
+
+    list_entry_t *le = &free_list;
+    while ((le = list_next(le)) != &free_list) {
         p = le2page(le, page_link);
-        le = list_next(le);
         if (base + base->property == p) {
             base->property += p->property;
-            ClearPageProperty(p);
-            list_del(&(p->page_link));
-        }
-        else if (p + p->property == base) {
-            p->property += base->property;
             ClearPageProperty(base);
+            list_del(&(p->page_link));   
+        }
+        if (p + p->property != base) {
+            p->property += base->property;
+            ClearPageProperty(p);
             base = p;
             list_del(&(p->page_link));
         }
     }
+    
     nr_free += n;
-    list_add(&free_list, &(base->page_link));
+    le = &free_list;
+    while ((le == list_next(le)) != &free_list) {
+        p = le2page(le, page_link);
+        if (base + base->property <= p) {
+            assert(base + base->property != p);
+            break;
+        }
+    }
+    list_add_before(le, &(base->page_link));
 }
 
 static size_t

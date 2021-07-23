@@ -194,7 +194,8 @@ page_init(void) {
     cprintf("e820map:\n");
     int i;
     for (i = 0; i < memmap->nr_map; i ++) {
-        uint64_t begin = memmap->map[i].addr, end = begin + memmap->map[i].size;
+        uint64_t begin = memmap->map[i].addr;
+        uint64_t end = begin + memmap->map[i].size;
         cprintf("  memory: %08llx, [%08llx, %08llx], type = %d.\n",
                 memmap->map[i].size, begin, end - 1, memmap->map[i].type);
         if (memmap->map[i].type == E820_ARM) {
@@ -379,8 +380,81 @@ get_pte(pde_t *pgdir, uintptr_t la, bool create) {
                           // (7) set page directory entry's permission
     }
     return NULL;          // (8) return page table entry
+    
 #endif
+    // typedef uintptr_t pde_t;
+    // pdep page directory entry page
+    pde_t *pdep = NULL;
+
+    // page directory index = 
+    uintptr_t pdi = PDX(la);
+    // 根据一级页表项索引从一级页表中找到对应的页目录项指针
+    *pdep = &pgdir[pdi];
+
+    // PTE_P页表存在位，如果不存在，则（缺页）需要分配新页
+    if (!(*pdep & PTE_P)) {
+        struct Page *p;
+        if (!create || (p = alloc_page()) == NULL) {
+            return NULL;
+        }
+
+        // 二级页表对应的物理页，引用设置为1
+        set_page_ref(p, 1);
+        //获得page对应的物理地址
+        uintptr_t pagepa = page2pa(p);
+        // 页内容全部填0， PGSIZE=4096bytes
+        memset(pa2page, 0, PGSIZE);
+        *pdep = pagepa | PTE_U | PTE_W | PTE_P;
+    }
+
+    // page table index
+    // #define PTX(la) ((((uintptr_t)(la)) >> PTXSHIFT) & 0x3FF)
+    uintptr_t pti = PTX(la);
+
+    // address in page table or page directory entry
+    // #define PTE_ADDR(pte)   ((uintptr_t)(pte) & ~0xFFF)
+    // #define PDE_ADDR(pde)   PTE_ADDR(pde)
+    // 0xFFF = 00000000 00000000 00001111 11111111 
+    //~0xFFF = 11111111 11111111 11110000 00000000
+    // 低12位全0，只保留高20位
+    PDE_ADDR(*pdep);
+
+    // 物理地址处理
+    // 1.uintptr_t __m_pa = (pa);  
+    // 2.size_t __m_ppn = PPN(__m_pa);
+    //      将此地址先右移12位
+    // 3.          if (__m_ppn >= npage) {                                     
+    //                 panic("KADDR called with invalid pa %08lx", __m_pa);    
+    //             }        
+    //      判断，__m_ppn 不能大于 npage(物理内存页数)      
+    // 4.(void *) (__m_pa + KERNBASE);   // #define KERNBASE            0xC0000000
+    //      返回线性地址：即物理地址+0xC0000000
+    KADDR(PDE_ADDR(*pdep));
+
+
+    return &((pte_t *)KADDR(PDE_ADDR(*pdep)))[PTX(la)];
 }
+// amount of physical memory (in pages)
+// size_t npage = 0;
+
+// #define PTXSHIFT        12                      // offset of PTX in a linear address
+
+// page number field of address
+// #define PPN(la) (((uintptr_t)(la)) >> PTXSHIFT)
+
+/* *
+ * KADDR - takes a physical address and returns the corresponding kernel virtual
+ * address. It panics if you pass an invalid physical address.
+ * */
+// #define KADDR(pa) ({                                                    
+//             uintptr_t __m_pa = (pa);                                    
+//             size_t __m_ppn = PPN(__m_pa);                               
+//             if (__m_ppn >= npage) {                                     
+//                 panic("KADDR called with invalid pa %08lx", __m_pa);    
+//             }                                                           
+//             (void *) (__m_pa + KERNBASE);                               
+//         })
+
 
 //get_page - get related Page struct for linear address la using PDT pgdir
 struct Page *
