@@ -380,7 +380,70 @@ get_pte(pde_t *pgdir, uintptr_t la, bool create) {
     }
     return NULL;          // (8) return page table entry
 #endif
+    pde_t *pdep = NULL;
+    // page directory index
+    // #define PDX(la) ((((uintptr_t)(la)) >> PDXSHIFT) & 0x3FF)
+    // #define PTXSHIFT        12                      // offset of PTX in a linear address
+    // #define PDXSHIFT        22                      // offset of PDX in a linear address
+    // la 右移22位，0x3FF = 0011 11111111
+    // 比如 la = 00101000 00000000 00000000 00000000 =  0010100000|0000000000|000000000000
+    // la >> 22 & 0x3FF = 0010100000 & 001111111111 = 0010100000
+    // 即取la的最高10位，此高10位的值就是在PGDIR中的下标索引值
+    // 获取传入的线性地址中所对应的页目录条目的物理地址
+    pdep = pgdir[PDX(la)];
+
+    // 如果存在位不为1，如果该条目不可用(not present)
+    if (!(*pdep & PTE_P)) {
+        struct Page *p;
+        if (!create || (p = alloc_page()) == NULL) {
+            return NULL;
+        }
+
+        // 设置页面引用
+        set_page_ref(p, 1);
+
+        // 获取页面的物理地址
+        uintptr_t pa = page2pa(p);
+
+        // 清空数据
+        memset(pa, 0, PGSIZE);
+
+        // 将新分配的页面设置为当前缺失的页目录条目中
+        // 之后该页面就是其中的一个二级页面
+        *pdep = pa | PTE_P | PTE_W | PTE_U;
+
+    }
+
+    // 返回在pgdir中对应于la的二级页表项
+    // get_pte 返回的是page table entry
+    // KADDR() 根据物理地址返回kernel virtual address
+
+    // KADDR 作用：
+    // 1.先右移12位，然后判断右移后的数据如果>= npage，则报错
+    // 2.返回原地址+KERNBASE（0xC0000000）
+
+    // PDE_ADDR作用:
+    // 1. 将值 & ~0xFFF = xxxxx & ~111111111111
+
+    // #define PTX(la) ((((uintptr_t)(la)) >> PTXSHIFT) & 0x3FF)
+    // 线性地址右移12位，再& 001111111111，得到的是中间10位数，即在page table entry数组中的索引
+    
+
+    return ((pte_t *)KADDR(PDE_ADDR(*pdep)))[PTX(la)];
 }
+
+// page number field of address
+// #define PPN(la) (((uintptr_t)(la)) >> PTXSHIFT)
+
+// #define KADDR(pa) ({                                                    \
+//             uintptr_t __m_pa = (pa);                                    \
+//             size_t __m_ppn = PPN(__m_pa);                               \
+//             if (__m_ppn >= npage) {                                     \
+//                 panic("KADDR called with invalid pa %08lx", __m_pa);    \
+//             }                                                           \
+//             (void *) (__m_pa + KERNBASE);                               \
+//         })
+
 
 //get_page - get related Page struct for linear address la using PDT pgdir
 struct Page *
@@ -425,6 +488,22 @@ page_remove_pte(pde_t *pgdir, uintptr_t la, pte_t *ptep) {
                                   //(6) flush tlb
     }
 #endif
+    struct Page *page = NULL;
+    // 如果page table entry(页目录)是可用的
+    if (*ptep & PTE_P) {
+        page = pte2page(ptep);
+        
+        // 引用减一
+        if (page_ref_dec(pa2page) == 0) {
+            // 如果引用减一后为0，则释放page
+            free_page(page);
+        }
+        // 清空ptep内容
+        *ptep = 0;
+
+        // 刷新TLB内容
+        tlb_invalidate(pgdir, la);
+    }
 }
 
 //page_remove - free an Page which is related linear address la and has an validated pte
