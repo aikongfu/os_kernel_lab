@@ -12,7 +12,7 @@ typedef struct list_entry list_entry_t;
 
 static inline void list_init(list_entry_t *elm) {
 	elm->prev = elm->next = elm;
-}
+};
 
 
 int main() {
